@@ -1,3 +1,6 @@
+use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::time::{Duration, SystemTime};
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[derive(Clone, Copy)]
@@ -6,8 +9,8 @@ enum Puzzle {
     Second,
 }
 
-impl std::fmt::Display for Puzzle {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl Display for Puzzle {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
             Self::First => write!(f, "1"),
             Self::Second => write!(f, "2"),
@@ -19,19 +22,25 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match args.as_slice() {
         [_] => {
+            let start = SystemTime::now();
             for day in 1..=25 {
                 let puz1 = run_puzzle(day, Puzzle::First).transpose()?;
                 let puz2 = run_puzzle(day, Puzzle::Second).transpose()?;
                 if puz1.is_some() || puz2.is_some() {
                     println!("Day {day:2}:");
                 }
-                if let Some(output) = puz1 {
-                    println!("    Part 1: {output}");
+                if let Some((output, time)) = puz1 {
+                    println!("    Part 1 ({time:?}): {output}");
                 }
-                if let Some(output) = puz2 {
-                    println!("    Part 2: {output}");
+                if let Some((output, time)) = puz2 {
+                    println!("    Part 2 ({time:?}): {output}");
                 }
             }
+            println!("----------------------");
+            println!(
+                "Total time: {:?}",
+                start.elapsed().unwrap_or(Duration::ZERO)
+            );
         }
         [_, day, puz] => {
             let day = day.parse::<u32>()?;
@@ -41,7 +50,7 @@ fn main() -> Result<()> {
                 _ => return Err("[puzzle] can be 1 or 2".into()),
             };
             match run_puzzle(day, puzzle).transpose()? {
-                Some(output) => println!("Day {day}, part {puzzle}: {output}"),
+                Some((output, time)) => println!("Day {day}, part {puzzle} ({time:?}): {output}"),
                 None => println!("Day {day} part {puzzle} is not yet implemented"),
             };
         }
@@ -50,13 +59,16 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_puzzle(day: u32, puzzle: Puzzle) -> Option<Result<String>> {
-    Some(match day {
+fn run_puzzle(day: u32, puzzle: Puzzle) -> Option<Result<(String, Duration)>> {
+    let start = SystemTime::now();
+    let output = Some(match day {
         1 => dec01::run(puzzle),
         2 => dec02::run(puzzle),
-        // 3 => dec03::run(puzzle),
+        3 => dec03::run(puzzle),
         _ => return None,
-    })
+    });
+    let elapsed = start.elapsed().unwrap_or(Duration::ZERO);
+    output.map(|result| result.map(|output| (output, elapsed)))
 }
 
 pub mod dec03 {
@@ -70,11 +82,104 @@ pub mod dec03 {
     }
 
     fn first() -> Result<String> {
-        unimplemented!()
+        let (parts, symbols) = parse_grid()?;
+        let sum = parts
+            .iter()
+            .filter_map(|part| {
+                symbols
+                    .iter()
+                    .find(|s| part.adjacent_to(s))
+                    .map(|_| part.id)
+            })
+            .sum::<u32>();
+        Ok(sum.to_string())
     }
 
     fn second() -> Result<String> {
-        unimplemented!()
+        let (parts, symbols) = parse_grid()?;
+        let ratio = symbols
+            .iter()
+            .filter(|symbol| symbol.kind == '*')
+            .filter_map(|symbol| {
+                let mut iter = parts.iter().filter(|part| part.adjacent_to(symbol));
+                match (iter.next(), iter.next(), iter.next()) {
+                    (Some(part1), Some(part2), None) => Some(part1.id * part2.id),
+                    _ => None,
+                }
+            })
+            .sum::<u32>();
+        Ok(ratio.to_string())
+    }
+
+    #[derive(Debug)]
+    struct Part {
+        id: u32,
+        row: u32,
+        col_left: u32,
+        col_right: u32,
+    }
+
+    #[derive(Debug)]
+    struct Symbol {
+        kind: char,
+        row: u32,
+        col: u32,
+    }
+
+    impl Part {
+        fn new(id: u32, row: u32, col_left: u32, col_right: u32) -> Self {
+            Self {
+                id,
+                row,
+                col_left,
+                col_right,
+            }
+        }
+
+        fn adjacent_to(&self, other: &Symbol) -> bool {
+            other.row >= self.row.saturating_sub(1)
+                && other.row <= self.row + 1
+                && other.col >= self.col_left.saturating_sub(1)
+                && other.col <= self.col_right + 1
+        }
+    }
+
+    fn parse_grid() -> Result<(Vec<Part>, Vec<Symbol>)> {
+        let (mut row, mut col) = (0, 0);
+        let (mut parts, mut symbols) = (Vec::new(), Vec::new());
+        let mut curr_id = None;
+        for c in load_input(3)?.chars() {
+            match c {
+                '\n' => {
+                    if let Some(id) = curr_id.take() {
+                        parts.push(Part::new(id, row, col - 1 - id.ilog10(), col - 1));
+                    };
+                    row += 1;
+                    col = 0;
+                }
+                '.' => {
+                    if let Some(id) = curr_id.take() {
+                        parts.push(Part::new(id, row, col - 1 - id.ilog10(), col - 1));
+                    };
+                    col += 1;
+                }
+                '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' => {
+                    let curr = c as u32 - 48;
+                    curr_id = curr_id.map(|v| v * 10 + curr).or(Some(curr));
+                    col += 1;
+                }
+                kind => {
+                    if let Some(id) = curr_id.take() {
+                        parts.push(Part::new(id, row, col - 1 - id.ilog10(), col - 1));
+                    };
+                    symbols.push(Symbol { kind, row, col });
+                    col += 1;
+                }
+            };
+        }
+        parts.sort_unstable_by(|a, b| a.row.cmp(&b.row).then(a.col_left.cmp(&b.col_left)));
+        symbols.sort_unstable_by(|a, b| a.row.cmp(&b.row).then(a.col.cmp(&b.col)));
+        Ok((parts, symbols))
     }
 }
 
@@ -212,15 +317,15 @@ pub mod dec01 {
         Ok(digit_and_spelled_sum)
     }
 
+    #[derive(Debug)]
     enum Direction {
         First,
         Last,
     }
 
-    #[allow(dead_code)]
+    #[derive(Debug)]
     enum NumType {
         Digit,
-        Spelled,
         Either,
     }
 
@@ -250,7 +355,6 @@ pub mod dec01 {
         };
         match kind {
             NumType::Digit => find_digit(line).map(|(_, n)| n),
-            NumType::Spelled => find_spelled(line).map(|(_, n)| n),
             NumType::Either => {
                 let options = [find_digit(line), find_spelled(line)];
                 let iter = options.iter().filter_map(|n| *n);
@@ -264,8 +368,38 @@ pub mod dec01 {
 }
 
 fn load_input(day: u8) -> Result<String> {
-    Ok(std::fs::read_to_string(format!(
-        "inputs/dec_{:02}.txt",
-        day
-    ))?)
+    Ok(std::fs::read_to_string(format!("inputs/dec_{day:02}.txt"))?)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{run_puzzle, Puzzle, Result};
+
+    #[test]
+    fn check_correctness() -> Result<()> {
+        let answers = [
+            "54159", "53866", // Day 1
+            "2317", "74804", // Day 2
+            "525119", "76504829", // Day 3
+        ];
+
+        for (idx, expected) in answers.iter().map(|s| s.to_string()).enumerate() {
+            let day = (idx as u32) / 2 + 1;
+            let puzzle = if idx % 2 == 0 {
+                Puzzle::First
+            } else {
+                Puzzle::Second
+            };
+            match run_puzzle(day, puzzle).transpose()? {
+                Some((actual, _)) => assert_eq!(
+                    expected, actual,
+                    "Failed assertion for day {day}, part {puzzle}."
+                ),
+                None => panic!(
+                    "Solution exists but puzzle is unimplemented for day {day}, part {puzzle}."
+                ),
+            };
+        }
+        Ok(())
+    }
 }
