@@ -65,10 +65,89 @@ fn run_puzzle(day: u32, puzzle: Puzzle) -> Option<Result<(String, Duration)>> {
         1 => dec01::run(puzzle),
         2 => dec02::run(puzzle),
         3 => dec03::run(puzzle),
+        4 => dec04::run(puzzle),
         _ => return None,
     });
     let elapsed = start.elapsed().unwrap_or(Duration::ZERO);
     output.map(|result| result.map(|output| (output, elapsed)))
+}
+
+pub mod dec04 {
+    use std::convert::TryFrom;
+
+    use crate::{load_input, Puzzle, Result};
+
+    pub(crate) fn run(puzzle: Puzzle) -> Result<String> {
+        match puzzle {
+            Puzzle::First => first(),
+            Puzzle::Second => second(),
+        }
+    }
+
+    fn first() -> Result<String> {
+        let summed_scores = load_input(4)?
+            .lines()
+            .map(Card::try_from)
+            .try_fold(0, |acc, x| x.map(|card| acc + card.score()))?
+            .to_string();
+        Ok(summed_scores)
+    }
+
+    fn second() -> Result<String> {
+        let cards = load_input(4)?
+            .lines()
+            .map(Card::try_from)
+            .collect::<Result<Vec<Card>>>()?;
+        let num_cards = cards.len();
+        let mut copies = vec![1; num_cards];
+        for (idx, card) in cards.iter().enumerate() {
+            let curr_count = copies[idx];
+            let num_to_boost = card.num_winners();
+            for i in (idx + 1)..=(std::cmp::min(idx + num_to_boost, num_cards)) {
+                copies[i] += curr_count;
+            }
+        }
+        let total_copies = copies.iter().sum::<u32>().to_string();
+        Ok(total_copies)
+    }
+
+    #[derive(Debug)]
+    struct Card {
+        winners: usize,
+    }
+
+    impl Card {
+        fn num_winners(&self) -> usize {
+            self.winners
+        }
+
+        fn score(&self) -> u32 {
+            1 << self.winners >> 1
+        }
+    }
+
+    impl TryFrom<&str> for Card {
+        type Error = Box<dyn std::error::Error>;
+        fn try_from(value: &str) -> Result<Self> {
+            type Res<T> = std::result::Result<Vec<T>, std::num::ParseIntError>;
+
+            let (_, data) = value.split_once(':').ok_or("Line is missing card id")?;
+            let (cards, have) = data.split_once('|').ok_or("Line is missing '|'")?;
+            let cards: Vec<_> = cards
+                .trim()
+                .split(' ')
+                .filter(|s| s.len() > 0)
+                .map(|n| n.trim().parse::<u32>())
+                .collect::<Res<_>>()?;
+            let winners = have
+                .trim()
+                .split(' ')
+                .filter(|s| s.len() > 0)
+                .map(|n| n.trim().parse::<u32>().map(|val| cards.iter().find(|v| **v == val)))
+                .try_fold(0, |acc, x| x.map(|opt| acc + opt.map(|_| 1).unwrap_or(0)))?;
+            Ok(Card { winners })
+        }
+    }
 }
 
 pub mod dec03 {
@@ -381,6 +460,7 @@ mod tests {
             "54159", "53866", // Day 1
             "2317", "74804", // Day 2
             "525119", "76504829", // Day 3
+            "25231", "9721255", // Day 4
         ];
 
         for (idx, expected) in answers.iter().map(|s| s.to_string()).enumerate() {
