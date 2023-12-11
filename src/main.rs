@@ -42,6 +42,17 @@ fn main() -> Result<()> {
                 start.elapsed().unwrap_or(Duration::ZERO)
             );
         }
+        [_, day] => {
+            let day = day.parse::<u32>()?;
+            for puzzle in [Puzzle::First, Puzzle::Second] {
+                match run_puzzle(day, puzzle).transpose()? {
+                    Some((output, time)) => {
+                        println!("Day {day}, part {puzzle} ({time:?}): {output}")
+                    }
+                    None => println!("Day {day} part {puzzle} is not yet implemented"),
+                };
+            }
+        }
         [_, day, puz] => {
             let day = day.parse::<u32>()?;
             let puzzle = match puz.parse::<u32>()? {
@@ -68,10 +79,187 @@ fn run_puzzle(day: u32, puzzle: Puzzle) -> Option<Result<(String, Duration)>> {
         4 => dec04::run(puzzle),
         5 => dec05::run(puzzle),
         6 => dec06::run(puzzle),
+        7 => dec07::run(puzzle),
         _ => return None,
     });
     let elapsed = start.elapsed().unwrap_or(Duration::ZERO);
     output.map(|result| result.map(|output| (output, elapsed)))
+}
+
+pub mod dec07 {
+    use std::cmp::Ordering;
+
+    use crate::{load_input, parse_as, Puzzle, Result};
+
+    pub(crate) fn run(puzzle: Puzzle) -> Result<String> {
+        match puzzle {
+            Puzzle::First => first(),
+            Puzzle::Second => second(),
+        }
+    }
+
+    fn first() -> Result<String> {
+        let mut hands = parse_input(Puzzle::First)?;
+        hands.sort_unstable();
+        let total_winnings = hands
+            .iter()
+            .enumerate()
+            .map(|(rank, hand)| hand.winnings(rank + 1))
+            .sum::<usize>()
+            .to_string();
+        Ok(total_winnings)
+    }
+
+    fn second() -> Result<String> {
+        let mut hands = parse_input(Puzzle::Second)?;
+        hands.sort_unstable();
+        let total_winnings = hands
+            .iter()
+            .enumerate()
+            .map(|(rank, hand)| {
+                println!("Rank: {rank:#04} = {hand:?}");
+                hand.winnings(rank + 1)
+            })
+            .sum::<usize>()
+            .to_string();
+        Ok(total_winnings)
+    }
+
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+    enum Type {
+        HighCard,
+        OnePair,
+        TwoPair,
+        ThreeOfAKind,
+        FullHouse,
+        FourOfAKind,
+        FiveOfAKind,
+    }
+
+    impl Type {
+        fn from_cards(val: &[u8; 5], jokers: bool) -> Self {
+            let mut counts = [0u8; 13];
+            val.iter().for_each(|card| counts[*card as usize] += 1);
+            let joker_count = if jokers {
+                let tmp = counts[0];
+                counts[0] = 0;
+                tmp
+            } else {
+                0
+            };
+            let fives = counts.iter().filter(|c| c == &&5).count();
+            let fours = counts.iter().filter(|c| c == &&4).count();
+            let threes = counts.iter().filter(|c| c == &&3).count();
+            let twos = counts.iter().filter(|c| c == &&2).count();
+            match (fives, fours, threes, twos) {
+                (1, _, _, _) => Self::FiveOfAKind,
+                (_, 1, _, _) => match joker_count {
+                    1 => Self::FiveOfAKind,
+                    _ => Self::FourOfAKind,
+                },
+                (_, _, 1, 1) => Self::FullHouse,
+                (_, _, 1, 0) => match joker_count {
+                    2 => Self::FiveOfAKind,
+                    1 => Self::FourOfAKind,
+                    _ => Self::ThreeOfAKind,
+                },
+                (_, _, _, 2) => match joker_count {
+                    1 => Self::FullHouse,
+                    _ => Self::TwoPair,
+                },
+                (_, _, _, 1) => match joker_count {
+                    3 => Self::FiveOfAKind,
+                    2 => Self::FourOfAKind,
+                    1 => Self::ThreeOfAKind,
+                    _ => Self::OnePair,
+                },
+                _ => match joker_count {
+                    5 | 4 => Self::FiveOfAKind,
+                    3 => Self::FourOfAKind,
+                    2 => Self::ThreeOfAKind,
+                    1 => Self::OnePair,
+                    _ => Self::HighCard,
+                },
+            }
+        }
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Hand {
+        hand_type: Type,
+        cards: [u8; 5],
+        bet: usize,
+    }
+
+    impl Hand {
+        fn parse(line: &str, jokers: bool) -> Result<Hand> {
+            let (hand, bet) = line
+                .split_once(' ')
+                .ok_or(format!("{line} is missing space"))?;
+            let bet = parse_as::<usize>(bet)?;
+            debug_assert!(hand.len() == 5, "{hand} doesn't have 5 characters");
+
+            let mut cards = [0u8; 5];
+            let mut chars = hand.chars().enumerate();
+            let offset = if jokers { 1 } else { 0 };
+            while let Some((idx, card)) = chars.next() {
+                match card {
+                    '2' => cards[idx] = 0 + offset,
+                    '3' => cards[idx] = 1 + offset,
+                    '4' => cards[idx] = 2 + offset,
+                    '5' => cards[idx] = 3 + offset,
+                    '6' => cards[idx] = 4 + offset,
+                    '7' => cards[idx] = 5 + offset,
+                    '8' => cards[idx] = 6 + offset,
+                    '9' => cards[idx] = 7 + offset,
+                    'T' => cards[idx] = 8 + offset,
+                    'J' => cards[idx] = if jokers { 0 } else { 9 },
+                    'Q' => cards[idx] = 10,
+                    'K' => cards[idx] = 11,
+                    'A' => cards[idx] = 12,
+                    x => Err(format!("{x} is not a valid card"))?,
+                }
+            }
+            let hand_type = Type::from_cards(&cards, jokers);
+            Ok(Self {
+                hand_type,
+                cards,
+                bet,
+            })
+        }
+
+        fn winnings(&self, rank: usize) -> usize {
+            self.bet * rank
+        }
+    }
+
+    impl PartialOrd for Hand {
+        fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
+            Some(self.hand_type.cmp(&rhs.hand_type).then_with(|| {
+                self.cards
+                    .iter()
+                    .zip(rhs.cards)
+                    .find(|(c, rhs_c)| c.cmp(&rhs_c).is_ne())
+                    .map(|(c, rhs_c)| c.cmp(&rhs_c))
+                    .unwrap_or(Ordering::Equal)
+            }))
+        }
+    }
+
+    impl Ord for Hand {
+        fn cmp(&self, rhs: &Self) -> Ordering {
+            self.partial_cmp(rhs)
+                .expect("Hand::partial_cmp is never None")
+        }
+    }
+
+    fn parse_input(part: Puzzle) -> Result<Vec<Hand>> {
+        let jokers = matches!(part, Puzzle::Second);
+        load_input(7)?
+            .lines()
+            .map(|line| Hand::parse(line, jokers))
+            .collect()
+    }
 }
 
 pub mod dec06 {
@@ -940,12 +1128,20 @@ mod tests {
     #[test]
     fn check_correctness() -> Result<()> {
         let answers = [
-            "54159", "53866", // Day 1
-            "2317", "74804", // Day 2
-            "525119", "76504829", // Day 3
-            "25231", "9721255", // Day 4
-            "51580674", "99751240", // Day 5
-            "1195150", "42550411", // Day 6
+            "54159", // Day 1
+            "53866",
+            "2317", // Day 2
+            "74804",
+            "525119", // Day 3
+            "76504829",
+            "25231", // Day 4
+            "9721255",
+            "51580674", // Day 5
+            "99751240",
+            "1195150", // Day 6
+            "42550411",
+            "250058342", // Day 7
+            "250506580",
         ];
 
         for (idx, expected) in answers.iter().map(|s| s.to_string()).enumerate() {
