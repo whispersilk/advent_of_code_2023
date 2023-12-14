@@ -81,10 +81,99 @@ fn run_puzzle(day: u32, puzzle: Puzzle) -> Option<Result<(String, Duration)>> {
         6 => dec06::run(puzzle),
         7 => dec07::run(puzzle),
         8 => dec08::run(puzzle),
+        9 => dec09::run(puzzle),
         _ => return None,
     });
     let elapsed = start.elapsed().unwrap_or(Duration::ZERO);
     output.map(|result| result.map(|output| (output, elapsed)))
+}
+
+pub mod dec09 {
+    use crate::{load_input, parse_as, Puzzle, Result};
+
+    pub(crate) fn run(puzzle: Puzzle) -> Result<String> {
+        match puzzle {
+            Puzzle::First => first(),
+            Puzzle::Second => second(),
+        }
+    }
+
+    fn first() -> Result<String> {
+        let sum_next = parse_input()?
+            .into_iter()
+            .map(Value::into_next)
+            .sum::<i64>()
+            .to_string();
+        Ok(sum_next)
+    }
+
+    fn second() -> Result<String> {
+        let sum_prev = parse_input()?
+            .into_iter()
+            .map(Value::into_prev)
+            .sum::<i64>()
+            .to_string();
+        Ok(sum_prev)
+    }
+
+    struct Value {
+        history: Vec<i64>,
+    }
+
+    impl Value {
+        fn new(history: Vec<i64>) -> Self {
+            Self { history }
+        }
+
+        fn into_next(mut self) -> i64 {
+            Self::find_next(self.history.as_mut_slice())
+        }
+
+        fn find_next(history: &mut [i64]) -> i64 {
+            let mut end_idx = history.len() - 1;
+            while history.iter().take(end_idx + 1).any(|v| *v != 0) {
+                for idx in 0..end_idx {
+                    let diff = history[idx + 1] - history[idx];
+                    history[idx] = diff;
+                }
+                end_idx -= 1;
+            }
+            history.iter().sum::<i64>()
+        }
+
+        fn into_prev(mut self) -> i64 {
+            Self::find_prev(self.history.as_mut_slice())
+        }
+
+        fn find_prev(history: &mut [i64]) -> i64 {
+            let mut start_idx = 1;
+            while history.iter().skip(start_idx).any(|v| *v != 0) {
+                for idx in (start_idx..history.len()).rev() {
+                    let diff = history[idx] - history[idx - 1];
+                    history[idx] = diff;
+                }
+                start_idx += 1;
+            }
+            history
+                .iter()
+                .take(start_idx + 1)
+                .rev()
+                .fold(0, |prev, x| x - prev)
+        }
+    }
+
+    fn parse_input() -> Result<Vec<Value>> {
+        load_input(9)?
+            .lines()
+            .map(|line| {
+                let history = line
+                    .split_whitespace()
+                    .map(parse_as::<i64>)
+                    .collect::<Result<Vec<i64>>>()?;
+                Ok(Value::new(history))
+            })
+            .collect::<Result<Vec<Value>>>()
+    }
 }
 
 pub mod dec08 {
@@ -122,21 +211,28 @@ pub mod dec08 {
         fn new(input: &'a str) -> Result<Self> {
             let (directions, rest) = input.split_once("\n\n").ok_or("Missing '\\n\\n'")?;
             let directions = Directions::new(directions)?;
-            let mut nodes = rest.lines().map(Node::from_line).collect::<Result<Vec<Node>>>()?;
+            let mut nodes = rest
+                .lines()
+                .map(Node::from_line)
+                .collect::<Result<Vec<Node>>>()?;
             for idx in 0..nodes.len() {
                 let mut source = nodes[idx];
                 source.left = match source.left {
-                    Neighbor::Unresolved(l) => Neighbor::Resolved(nodes
-                        .iter()
-                        .position(|n| n.id == l)
-                        .ok_or(format!("Can't find node for left item {l}"))?),
+                    Neighbor::Unresolved(l) => Neighbor::Resolved(
+                        nodes
+                            .iter()
+                            .position(|n| n.id == l)
+                            .ok_or(format!("Can't find node for left item {l}"))?,
+                    ),
                     left @ Neighbor::Resolved(_) => left,
                 };
                 source.right = match source.right {
-                    Neighbor::Unresolved(r) => Neighbor::Resolved(nodes
-                        .iter()
-                        .position(|n| n.id == r)
-                        .ok_or(format!("Can't find node for right item {r}"))?),
+                    Neighbor::Unresolved(r) => Neighbor::Resolved(
+                        nodes
+                            .iter()
+                            .position(|n| n.id == r)
+                            .ok_or(format!("Can't find node for right item {r}"))?,
+                    ),
                     right @ Neighbor::Resolved(_) => right,
                 };
                 nodes[idx] = source;
@@ -149,7 +245,8 @@ pub mod dec08 {
             S: Fn(&Node) -> bool,
             E: Fn(&Node) -> bool,
         {
-            let combined_len = self.nodes
+            let combined_len = self
+                .nodes
                 .iter()
                 .enumerate()
                 .filter(|(_, n)| starts(n))
@@ -163,7 +260,9 @@ pub mod dec08 {
                         };
                         idx = match next {
                             Neighbor::Resolved(i) => i,
-                            Neighbor::Unresolved(_) => unreachable!("Neighbor {next:?} is not resolved"),
+                            Neighbor::Unresolved(_) => {
+                                unreachable!("Neighbor {next:?} is not resolved")
+                            }
                         };
                         if ends(&self.nodes[idx]) {
                             return steps;
@@ -223,7 +322,7 @@ pub mod dec08 {
     }
 
     #[derive(Clone, Copy)]
-    struct Directions<'a>{
+    struct Directions<'a> {
         instructions: &'a str,
         index: usize,
     }
@@ -243,18 +342,15 @@ pub mod dec08 {
     impl<'a> Iterator for Directions<'a> {
         type Item = Direction;
         fn next(&mut self) -> Option<Self::Item> {
-            self.instructions
-                .chars()
-                .nth(self.index)
-                .map(|c| {
-                    self.index += 1;
-                    match c {
-                        'L' => Direction::Left,
-                        'R' => Direction::Right,
-                        _ => unreachable!(),
-                    }
-                })
-        } 
+            self.instructions.chars().nth(self.index).map(|c| {
+                self.index += 1;
+                match c {
+                    'L' => Direction::Left,
+                    'R' => Direction::Right,
+                    _ => unreachable!(),
+                }
+            })
+        }
     }
 
     enum Direction {
@@ -1318,6 +1414,8 @@ mod tests {
             "250506580",
             "15989", // Day 8
             "13830919117339",
+            "1798691765", // Day 9
+            "1104",
         ];
 
         for (idx, expected) in answers.iter().map(|s| s.to_string()).enumerate() {
