@@ -487,7 +487,7 @@ pub mod dec06 {
                 }
             });
             let (max, min) = (max.expect("Max exists"), min.expect("Min exists"));
-            max - min + 1
+            max - min
         }
 
         fn is_solution(&self, val: usize) -> bool {
@@ -596,7 +596,8 @@ pub mod dec05 {
             .map(|seed_range| {
                 ranges
                     .iter()
-                    .find_map(|range| range.translate_min(seed_range))
+                    .filter_map(|range| range.translate_min(seed_range))
+                    .min()
                     .unwrap_or(seed_range.0)
             })
             .min()
