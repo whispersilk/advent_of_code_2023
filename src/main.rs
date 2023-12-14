@@ -80,10 +80,187 @@ fn run_puzzle(day: u32, puzzle: Puzzle) -> Option<Result<(String, Duration)>> {
         5 => dec05::run(puzzle),
         6 => dec06::run(puzzle),
         7 => dec07::run(puzzle),
+        8 => dec08::run(puzzle),
         _ => return None,
     });
     let elapsed = start.elapsed().unwrap_or(Duration::ZERO);
     output.map(|result| result.map(|output| (output, elapsed)))
+}
+
+pub mod dec08 {
+    use crate::{load_input, Puzzle, Result};
+
+    pub(crate) fn run(puzzle: Puzzle) -> Result<String> {
+        match puzzle {
+            Puzzle::First => first(),
+            Puzzle::Second => second(),
+        }
+    }
+
+    fn first() -> Result<String> {
+        let input = load_input(8)?;
+        let len = Network::new(&input)?
+            .path_len(|n| n.id == "AAA", |n| n.id == "ZZZ")?
+            .to_string();
+        Ok(len)
+    }
+
+    fn second() -> Result<String> {
+        let input = load_input(8)?;
+        let len = Network::new(&input)?
+            .path_len(|n| n.id.ends_with('A'), |n| n.id.ends_with('Z'))?
+            .to_string();
+        Ok(len)
+    }
+
+    struct Network<'a> {
+        nodes: Vec<Node<'a>>,
+        directions: Directions<'a>,
+    }
+
+    impl<'a> Network<'a> {
+        fn new(input: &'a str) -> Result<Self> {
+            let (directions, rest) = input.split_once("\n\n").ok_or("Missing '\\n\\n'")?;
+            let directions = Directions::new(directions)?;
+            let mut nodes = rest.lines().map(Node::from_line).collect::<Result<Vec<Node>>>()?;
+            for idx in 0..nodes.len() {
+                let mut source = nodes[idx];
+                source.left = match source.left {
+                    Neighbor::Unresolved(l) => Neighbor::Resolved(nodes
+                        .iter()
+                        .position(|n| n.id == l)
+                        .ok_or(format!("Can't find node for left item {l}"))?),
+                    left @ Neighbor::Resolved(_) => left,
+                };
+                source.right = match source.right {
+                    Neighbor::Unresolved(r) => Neighbor::Resolved(nodes
+                        .iter()
+                        .position(|n| n.id == r)
+                        .ok_or(format!("Can't find node for right item {r}"))?),
+                    right @ Neighbor::Resolved(_) => right,
+                };
+                nodes[idx] = source;
+            }
+            Ok(Self { nodes, directions })
+        }
+
+        fn path_len<S, E>(&mut self, starts: S, ends: E) -> Result<usize>
+        where
+            S: Fn(&Node) -> bool,
+            E: Fn(&Node) -> bool,
+        {
+            let combined_len = self.nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, n)| starts(n))
+                .map(|(mut idx, _)| {
+                    let mut steps = 0;
+                    for direction in self.directions.cycle() {
+                        steps += 1;
+                        let next = match direction {
+                            Direction::Left => self.nodes[idx].left,
+                            Direction::Right => self.nodes[idx].right,
+                        };
+                        idx = match next {
+                            Neighbor::Resolved(i) => i,
+                            Neighbor::Unresolved(_) => unreachable!("Neighbor {next:?} is not resolved"),
+                        };
+                        if ends(&self.nodes[idx]) {
+                            return steps;
+                        }
+                    }
+                    unreachable!("Loop never ends")
+                })
+                .reduce(lcm)
+                .expect("There is at least one path");
+            Ok(combined_len)
+        }
+    }
+
+    // Find LCM using Stein's algorithm for GCD
+    fn lcm(mut a: usize, mut b: usize) -> usize {
+        let mult = a * b;
+        if a == 0 || b == 0 {
+            return a + b;
+        }
+        let trailing_pows_two = (a | b).trailing_zeros();
+        a >>= trailing_pows_two;
+        b >>= trailing_pows_two;
+        while a != b {
+            if a < b {
+                std::mem::swap(&mut a, &mut b);
+            }
+            a -= b;
+            a >>= a.trailing_zeros();
+        }
+        mult / (a << trailing_pows_two)
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum Neighbor<'a> {
+        Unresolved(&'a str),
+        Resolved(usize),
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct Node<'a> {
+        id: &'a str,
+        left: Neighbor<'a>,
+        right: Neighbor<'a>,
+    }
+
+    impl<'a> Node<'a> {
+        fn from_line(line: &'a str) -> Result<Self> {
+            let (me, others) = line.split_once(" = (").ok_or("No ' = ('")?;
+            let (left, right) = others.split_once(", ").ok_or("No ', '")?;
+            let right = right.strip_suffix(')').ok_or("No ')'")?;
+            Ok(Self {
+                id: me,
+                left: Neighbor::Unresolved(left),
+                right: Neighbor::Unresolved(right),
+            })
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct Directions<'a>{
+        instructions: &'a str,
+        index: usize,
+    }
+
+    impl<'a> Directions<'a> {
+        fn new(instructions: &'a str) -> Result<Self> {
+            match instructions.chars().find(|c| c != &'L' && c != &'R') {
+                Some(c) => Err(format!("Invalid path character '{c}'").into()),
+                None => Ok(Self {
+                    instructions,
+                    index: 0,
+                }),
+            }
+        }
+    }
+
+    impl<'a> Iterator for Directions<'a> {
+        type Item = Direction;
+        fn next(&mut self) -> Option<Self::Item> {
+            self.instructions
+                .chars()
+                .nth(self.index)
+                .map(|c| {
+                    self.index += 1;
+                    match c {
+                        'L' => Direction::Left,
+                        'R' => Direction::Right,
+                        _ => unreachable!(),
+                    }
+                })
+        } 
+    }
+
+    enum Direction {
+        Left,
+        Right,
+    }
 }
 
 pub mod dec07 {
@@ -116,10 +293,7 @@ pub mod dec07 {
         let total_winnings = hands
             .iter()
             .enumerate()
-            .map(|(rank, hand)| {
-                println!("Rank: {rank:#04} = {hand:?}");
-                hand.winnings(rank + 1)
-            })
+            .map(|(rank, hand)| hand.winnings(rank + 1))
             .sum::<usize>()
             .to_string();
         Ok(total_winnings)
@@ -200,11 +374,11 @@ pub mod dec07 {
             debug_assert!(hand.len() == 5, "{hand} doesn't have 5 characters");
 
             let mut cards = [0u8; 5];
-            let mut chars = hand.chars().enumerate();
+            let chars = hand.chars().enumerate();
             let offset = if jokers { 1 } else { 0 };
-            while let Some((idx, card)) = chars.next() {
+            for (idx, card) in chars {
                 match card {
-                    '2' => cards[idx] = 0 + offset,
+                    '2' => cards[idx] = offset,
                     '3' => cards[idx] = 1 + offset,
                     '4' => cards[idx] = 2 + offset,
                     '5' => cards[idx] = 3 + offset,
@@ -235,21 +409,20 @@ pub mod dec07 {
 
     impl PartialOrd for Hand {
         fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
-            Some(self.hand_type.cmp(&rhs.hand_type).then_with(|| {
+            Some(self.cmp(rhs))
+        }
+    }
+
+    impl Ord for Hand {
+        fn cmp(&self, rhs: &Self) -> Ordering {
+            self.hand_type.cmp(&rhs.hand_type).then_with(|| {
                 self.cards
                     .iter()
                     .zip(rhs.cards)
                     .find(|(c, rhs_c)| c.cmp(&rhs_c).is_ne())
                     .map(|(c, rhs_c)| c.cmp(&rhs_c))
                     .unwrap_or(Ordering::Equal)
-            }))
-        }
-    }
-
-    impl Ord for Hand {
-        fn cmp(&self, rhs: &Self) -> Ordering {
-            self.partial_cmp(rhs)
-                .expect("Hand::partial_cmp is never None")
+            })
         }
     }
 
@@ -1142,6 +1315,8 @@ mod tests {
             "42550411",
             "250058342", // Day 7
             "250506580",
+            "15989", // Day 8
+            "13830919117339",
         ];
 
         for (idx, expected) in answers.iter().map(|s| s.to_string()).enumerate() {
