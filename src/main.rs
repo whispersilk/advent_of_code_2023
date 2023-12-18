@@ -82,10 +82,200 @@ fn run_puzzle(day: u32, puzzle: Puzzle) -> Option<Result<(String, Duration)>> {
         7 => dec07::run(puzzle),
         8 => dec08::run(puzzle),
         9 => dec09::run(puzzle),
+        10 => dec10::run(puzzle),
         _ => return None,
     });
     let elapsed = start.elapsed().unwrap_or(Duration::ZERO);
     output.map(|result| result.map(|output| (output, elapsed)))
+}
+
+pub mod dec10 {
+    use std::collections::HashSet;
+
+    use crate::{load_input, Puzzle, Result};
+
+    pub(crate) fn run(puzzle: Puzzle) -> Result<String> {
+        match puzzle {
+            Puzzle::First => first(),
+            Puzzle::Second => second(),
+        }
+    }
+
+    fn first() -> Result<String> {
+        let input = load_input(10)?;
+        let grid = Grid::new(&input);
+        let path = grid.get_path();
+        let max_distance = (path.len() - 1).div_ceil(2).to_string();
+        Ok(max_distance)
+    }
+
+    fn second() -> Result<String> {
+        let input = load_input(10)?;
+        let grid = Grid::new(&input);
+        let contained = grid.enclosed().to_string();
+        Ok(contained)
+    }
+
+    #[derive(Debug, Copy, Clone, PartialEq)]
+    enum Direction {
+        North,
+        South,
+        East,
+        West,
+    }
+
+    impl Direction {
+        fn can_enter(&self, c: char) -> bool {
+            c == 'S'
+                || match self {
+                    Self::South => ['|', 'L', 'J'],
+                    Self::North => ['|', 'F', '7'],
+                    Self::West => ['-', 'L', 'F'],
+                    Self::East => ['-', 'J', '7'],
+                }
+                .contains(&c)
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    struct Position(usize, usize, usize, usize);
+
+    impl Position {
+        fn step(&self, dir: Direction) -> Option<Position> {
+            match dir {
+                Direction::North if self.0 > 0 => {
+                    Some(Position(self.0 - 1, self.1, self.2, self.3))
+                }
+                Direction::South if self.0 < self.2 => {
+                    Some(Position(self.0 + 1, self.1, self.2, self.3))
+                }
+                Direction::West if self.1 > 0 => Some(Position(self.0, self.1 - 1, self.2, self.3)),
+                Direction::East if self.1 < self.3 => {
+                    Some(Position(self.0, self.1 + 1, self.2, self.3))
+                }
+                _ => None,
+            }
+        }
+    }
+
+    struct Grid<'a> {
+        rows: Vec<&'a str>,
+        height: usize,
+        width: usize,
+    }
+
+    impl<'a> Grid<'a> {
+        fn new(input: &'a str) -> Self {
+            let rows = input.lines().collect::<Vec<_>>();
+            let height = rows.len();
+            let width = rows[0].len();
+            Self {
+                rows,
+                height,
+                width,
+            }
+        }
+
+        fn get(&self, pos: Position) -> char {
+            self.rows[pos.0]
+                .chars()
+                .nth(pos.1)
+                .expect("position is in bounds")
+        }
+
+        fn find_start(&self) -> Position {
+            self.rows
+                .iter()
+                .enumerate()
+                .find_map(|(row, line)| {
+                    line.chars()
+                        .position(|c| c == 'S')
+                        .map(|col| Position(row, col, self.width - 1, self.height - 1))
+                })
+                .expect("Grid must contain 'S'")
+        }
+
+        fn get_path(&self) -> HashSet<Position> {
+            use Direction::*;
+            let mut path = HashSet::new();
+            let start = self.find_start();
+            path.insert(start);
+            let mut curr = start;
+            'outer: loop {
+                let curr_char = self.get(curr);
+                let dirs = match curr_char {
+                    'S' => &[North, South, East, West][..],
+                    '|' => &[North, South][..],
+                    '-' => &[East, West][..],
+                    'L' => &[North, East][..],
+                    'J' => &[North, West][..],
+                    'F' => &[South, East][..],
+                    '7' => &[South, West][..],
+                    c => unreachable!("Error at position {curr:?}: {c} can't be in path"),
+                };
+                for direction in dirs {
+                    if let Some(next) = curr.step(*direction) {
+                        let next_char = self.get(next);
+                        let can_enter = direction.can_enter(next_char);
+                        if can_enter && !path.contains(&next) {
+                            path.insert(next);
+                            curr = next;
+                            break;
+                        }
+                        if path.len() > 2 && next_char == 'S' {
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+            path
+        }
+
+        fn enclosed(&self) -> usize {
+            use Direction::*;
+            let path = self.get_path();
+            let mut contained_count = 0;
+            for row in 0..self.width {
+                let mut contained = false;
+                let mut from_dir = None;
+                for col in 0..self.height {
+                    let pos = Position(row, col, self.width - 1, self.height - 1);
+                    let part_of_path = path.contains(&pos);
+                    let curr = self.get(pos);
+                    if part_of_path {
+                        match curr {
+                            '-' => continue,
+                            '|' => contained = !contained,
+                            'F' => from_dir = Some(South),
+                            'L' => from_dir = Some(North),
+                            'J' | '7' => match (from_dir, curr) {
+                                (Some(South), 'J') | (Some(North), '7') => contained = !contained,
+                                _ => continue,
+                            },
+                            'S' => {
+                                let exit_north = North.can_enter(
+                                    self.get(Position(pos.0.saturating_sub(1), pos.1, pos.2, pos.3))
+                                );
+                                let exit_south = South.can_enter(
+                                    self.get(Position(pos.0 + 1, pos.1, pos.2, pos.3))
+                                );
+                                match (from_dir, exit_north, exit_south) {
+                                    (Some(North), _, true) => contained = !contained,
+                                    (Some(South), true, _) => contained = !contained,
+                                    (None, _, _) => contained = !contained,
+                                    _ => continue,
+                                }
+                            }
+                            x => unreachable!("Char {x} at ({row}, {col}) can't be in path"),
+                        }
+                    } else if contained {
+                        contained_count += 1;
+                    }
+                }
+            }
+            contained_count
+        }
+    }
 }
 
 pub mod dec09 {
@@ -1416,6 +1606,8 @@ mod tests {
             "13830919117339",
             "1798691765", // Day 9
             "1104",
+            "6870", // Day 10
+            "287",
         ];
 
         for (idx, expected) in answers.iter().map(|s| s.to_string()).enumerate() {
