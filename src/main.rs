@@ -83,10 +83,79 @@ fn run_puzzle(day: u32, puzzle: Puzzle) -> Option<Result<(String, Duration)>> {
         8 => dec08::run(puzzle),
         9 => dec09::run(puzzle),
         10 => dec10::run(puzzle),
+        11 => dec11::run(puzzle),
         _ => return None,
     });
     let elapsed = start.elapsed().unwrap_or(Duration::ZERO);
     output.map(|result| result.map(|output| (output, elapsed)))
+}
+
+pub mod dec11 {
+    use crate::{load_input, Puzzle, Result};
+
+    pub(crate) fn run(puzzle: Puzzle) -> Result<String> {
+        match puzzle {
+            Puzzle::First => first(),
+            Puzzle::Second => second(),
+        }
+    }
+
+    fn first() -> Result<String> {
+        let galaxies = get_galaxies(2)?;
+        let distance = get_distances(galaxies.as_slice()).to_string();
+        Ok(distance)
+    }
+
+    fn second() -> Result<String> {
+        let galaxies = get_galaxies(1_000_000)?;
+        let distance = get_distances(galaxies.as_slice()).to_string();
+        Ok(distance)
+    }
+
+    fn get_distances(galaxies: &[(usize, usize)]) -> usize {
+        let mut distance = 0;
+        let mut idx = 1;
+        for (row_1, col_1) in galaxies.iter() {
+            for (row_2, col_2) in galaxies.iter().skip(idx) {
+                let x_diff = std::cmp::max(row_1, row_2) - std::cmp::min(row_1, row_2);
+                let y_diff = std::cmp::max(col_1, col_2) - std::cmp::min(col_1, col_2);
+                distance += x_diff + y_diff;
+            }
+            idx += 1;
+        }
+        distance
+    }
+
+    fn get_galaxies(expansion: usize) -> Result<Vec<(usize, usize)>> {
+        let mut galaxies = load_input(11)?
+            .lines()
+            .enumerate()
+            .flat_map(|(row_num, row)| {
+                row.chars()
+                    .enumerate()
+                    .filter(|(_, c)| c == &'#')
+                    .map(move |(idx, _)| (row_num, idx))
+            })
+            .collect::<Vec<_>>();
+
+        galaxies.sort_unstable_by_key(|g| g.0);
+        let (mut last_row, mut unused_rows) = (0, 0usize);
+        for galaxy in galaxies.iter_mut() {
+            unused_rows += (galaxy.0 - last_row).saturating_sub(1) * (expansion - 1);
+            last_row = galaxy.0;
+            galaxy.0 += unused_rows;
+        }
+
+        galaxies.sort_unstable_by_key(|g| g.1);
+        let (mut last_col, mut unused_cols) = (0, 0usize);
+        for galaxy in galaxies.iter_mut() {
+            unused_cols += (galaxy.1 - last_col).saturating_sub(1) * (expansion - 1);
+            last_col = galaxy.1;
+            galaxy.1 += unused_cols;
+        }
+
+        Ok(galaxies)
+    }
 }
 
 pub mod dec10 {
@@ -253,12 +322,18 @@ pub mod dec10 {
                                 _ => continue,
                             },
                             'S' => {
-                                let exit_north = North.can_enter(
-                                    self.get(Position(pos.0.saturating_sub(1), pos.1, pos.2, pos.3))
-                                );
-                                let exit_south = South.can_enter(
-                                    self.get(Position(pos.0 + 1, pos.1, pos.2, pos.3))
-                                );
+                                let exit_north = North.can_enter(self.get(Position(
+                                    pos.0.saturating_sub(1),
+                                    pos.1,
+                                    pos.2,
+                                    pos.3,
+                                )));
+                                let exit_south = South.can_enter(self.get(Position(
+                                    pos.0 + 1,
+                                    pos.1,
+                                    pos.2,
+                                    pos.3,
+                                )));
                                 match (from_dir, exit_north, exit_south) {
                                     (Some(North), _, true) => contained = !contained,
                                     (Some(South), true, _) => contained = !contained,
@@ -1608,6 +1683,8 @@ mod tests {
             "1104",
             "6870", // Day 10
             "287",
+            "9681886", // Day 11
+            "791134099634",
         ];
 
         for (idx, expected) in answers.iter().map(|s| s.to_string()).enumerate() {
